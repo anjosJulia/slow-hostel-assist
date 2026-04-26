@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 360px;
+      font-family: 'DM Sans', sans-serif;
+      background: #f5f0eb;
+      color: #1a1a1a;
+      overflow-y: auto;
+    }
+
+    .header {
+      background: #3a7d44;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-icon { font-size: 22px; }
+    .header-text { color: white; }
+    .header-text h1 { font-size: 14px; font-weight: 600; line-height: 1.2; }
+    .header-text p  { font-size: 11px; opacity: 0.8; margin-top: 1px; }
+
+    .body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+    .btn-generate {
+      width: 100%;
+      padding: 11px;
+      background: #3a7d44;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+    .btn-generate:hover  { background: #2e6436; }
+    .btn-generate:active { background: #255230; }
+
+    .result-box {
+      display: none;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .result-label {
+      background: #f0ede8;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #ddd;
+    }
+    .result-text {
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      color: #222;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .btn-copy {
+      display: none;
+      width: 100%;
+      padding: 11px;
+      background: #1a1a1a;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s;
+    }
+    .btn-copy:hover  { background: #333; }
+    .btn-copy:active { background: #555; }
+
+    .status {
+      font-size: 12px;
+      text-align: center;
+      color: #777;
+      min-height: 16px;
+    }
+    .status.ok    { color: #3a7d44; font-weight: 600; }
+    .status.error { color: #c0392b; }
+
+    .tag-type {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e6436;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin: 4px 12px 0;
+    }
+
+    .template-selector {
+      display: flex;
+      background: #e8e3dd;
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+    .selector-btn {
+      flex: 1;
+      padding: 8px 4px;
+      border: none;
+      border-radius: 6px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      background: transparent;
+      color: #666;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .selector-btn.active {
+      background: white;
+      color: #1a1a1a;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+
+    .guest-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .guest-card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .guest-card-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    .guest-card-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .guest-phone-input {
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      color: #1a1a1a;
+      background: #fafafa;
+    }
+    .guest-phone-input:focus {
+      outline: none;
+      border-color: #3a7d44;
+    }
+    .btn-whatsapp {
+      padding: 7px 12px;
+      background: #25d366;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .btn-whatsapp:hover  { background: #1fba58; }
+    .btn-whatsapp:active { background: #18a04c; }
+    .btn-whatsapp:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+
+    .option-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #444;
+      padding: 2px 0;
+      cursor: pointer;
+    }
+    .option-row input[type="checkbox"] {
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+      accent-color: #3a7d44;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-icon">🏨</span>
+    <div class="header-text">
+      <h1>Slow Hostel Assist</h1>
+      <p>Slow Hostel · WhatsApp</p>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="template-selector">
+      <button class="selector-btn active" id="btn-select-quote">📋 Orç.</button>
+      <button class="selector-btn" id="btn-select-pre-reservation">💳 Pré-res.</button>
+      <button class="selector-btn" id="btn-select-breakfast">☕ Café</button>
+      <button class="selector-btn" id="btn-select-checkin-tomorrow">📲 Check-in</button>
+    </div>
+
+    <label class="option-row" id="option-show-discount">
+      <input type="checkbox" id="checkbox-show-discount" />
+      Exibir desconto para o hóspede
+    </label>
+
+    <button class="btn-generate" id="btn-generate">
+      ✨ Gerar template
+    </button>
+
+    <div class="result-box" id="result-box">
+      <div class="result-label">Preview do template</div>
+      <span class="tag-type" id="tag-type"></span>
+      <div class="result-text" id="result-content"></div>
+    </div>
+
+    <button class="btn-copy" id="btn-copy">
+      📋 Copiar para WhatsApp
+    </button>
+
+    <div id="checkin-section" style="display:none; flex-direction:column; gap:10px;">
+      <div class="guest-list" id="guest-list"></div>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

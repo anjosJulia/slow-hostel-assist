@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Claude Code (internal tooling)
+.claude/
+CLAUDE.md
+PROJECT_CONTEXT.md
+
+# Deploy guide (use once, then delete)
+PUBLICACAO.md
+
+# Dev reference files
+html-ref-modal-cotacao.html
+
+# Build artifacts
+*.zip

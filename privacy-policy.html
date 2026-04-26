@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Política de Privacidade — Slow Hostel Assist</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 720px;
+      margin: 48px auto;
+      padding: 0 24px;
+      color: #222;
+      line-height: 1.7;
+    }
+    h1 { font-size: 1.6rem; margin-bottom: 4px; }
+    h2 { font-size: 1.1rem; margin-top: 36px; color: #333; }
+    p, li { font-size: 0.97rem; }
+    ul { padding-left: 20px; }
+    .updated { color: #777; font-size: 0.85rem; margin-bottom: 32px; }
+    a { color: #0066cc; }
+  </style>
+</head>
+<body>
+
+  <h1>Política de Privacidade</h1>
+  <p class="updated">Última atualização: abril de 2026</p>
+
+  <p>
+    Esta Política de Privacidade descreve como a extensão <strong>Slow Hostel Assist</strong>
+    trata as informações durante o seu uso. A extensão foi desenvolvida para uso interno
+    da equipe do Slow Hostel e não é destinada ao público geral.
+  </p>
+
+  <h2>1. Quem desenvolve esta extensão</h2>
+  <p>
+    A extensão é mantida pela equipe do Slow Hostel para uso operacional interno.
+    Dúvidas podem ser enviadas para
+    <a href="mailto:dev.juliadosanjos@gmail.com">dev.juliadosanjos@gmail.com</a>.
+  </p>
+
+  <h2>2. Quais dados são acessados</h2>
+  <p>
+    A extensão lê o conteúdo visível das páginas do sistema HQBeds
+    (<code>admin.hqbeds.com.br</code>) — especificamente textos de reservas,
+    datas, tipos de acomodação e listas de ocupação — para gerar automaticamente
+    templates de mensagens para WhatsApp.
+  </p>
+  <p>Esses dados incluem informações como:</p>
+  <ul>
+    <li>Nomes de hóspedes e datas de check-in/check-out exibidos na tela do HQBeds</li>
+    <li>Tipo de quarto e quantidade de hóspedes</li>
+    <li>Dados de ocupação para a lista de café da manhã</li>
+  </ul>
+
+  <h2>3. O que fazemos com esses dados</h2>
+  <p>
+    Os dados lidos são utilizados <strong>exclusivamente</strong> para montar
+    o texto do template no popup da extensão. Todo o processamento ocorre
+    localmente no navegador do usuário.
+  </p>
+  <ul>
+    <li>Nenhum dado é enviado para servidores externos.</li>
+    <li>Nenhum dado é armazenado pela extensão (em disco, banco de dados ou nuvem).</li>
+    <li>Nenhum dado é compartilhado com terceiros.</li>
+    <li>Os dados existem apenas na memória do navegador durante o uso do popup e são descartados ao fechar.</li>
+  </ul>
+
+  <h2>4. Permissões utilizadas e por quê</h2>
+  <ul>
+    <li>
+      <strong>activeTab</strong> — necessária para identificar a aba ativa do HQBeds
+      antes de injetar o script de leitura.
+    </li>
+    <li>
+      <strong>scripting</strong> — necessária para injetar as funções de leitura do DOM
+      nas páginas do HQBeds e capturar os dados exibidos na tela.
+    </li>
+    <li>
+      <strong>clipboardWrite</strong> — necessária para copiar o template gerado
+      para a área de transferência, facilitando o envio pelo WhatsApp.
+    </li>
+    <li>
+      <strong>Host permission (admin.hqbeds.com.br)</strong> — a extensão opera
+      exclusivamente neste domínio. Nenhum outro site é acessado.
+    </li>
+  </ul>
+
+  <h2>5. Armazenamento e retenção</h2>
+  <p>
+    A extensão não utiliza <code>localStorage</code>, <code>chrome.storage</code>,
+    cookies ou qualquer mecanismo de persistência de dados. Ao fechar o popup,
+    todos os dados processados são descartados.
+  </p>
+
+  <h2>6. Compartilhamento com terceiros</h2>
+  <p>
+    A extensão não compartilha dados com nenhum terceiro. Não utiliza serviços
+    de analytics, rastreamento, publicidade ou APIs externas.
+  </p>
+
+  <h2>7. Segurança</h2>
+  <p>
+    Como os dados não saem do navegador do usuário e não são armazenados,
+    o risco de exposição é mínimo. A extensão opera apenas no sistema interno
+    do Slow Hostel (HQBeds), acessível somente por colaboradores autenticados.
+  </p>
+
+  <h2>8. Alterações nesta política</h2>
+  <p>
+    Esta política pode ser atualizada conforme a extensão evolui.
+    A data de última atualização sempre será indicada no topo deste documento.
+  </p>
+
+  <h2>9. Contato</h2>
+  <p>
+    Em caso de dúvidas sobre esta política, entre em contato pelo e-mail
+    <a href="mailto:dev.juliadosanjos@gmail.com">dev.juliadosanjos@gmail.com</a>.
+  </p>
+
+</body>
+</html>
