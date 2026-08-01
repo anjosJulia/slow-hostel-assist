@@ -15,7 +15,7 @@ Reduzir o tempo operacional e evitar erros de digitacao/copy-paste no atendiment
 
 ## Como funciona
 
-A extensao e aberta no popup do Chrome e, quando acionada, injeta funcoes de leitura nas paginas do HQBeds (`chrome.scripting.executeScript`) para capturar os dados visiveis na interface e montar os textos automaticamente.
+A extensao abre em um painel lateral fixo do Chrome (side panel), que permanece aberto mesmo ao clicar na pagina — so fecha quando o icone da extensao e clicado novamente ou o painel e fechado manualmente. Quando acionada, ela injeta funcoes de leitura nas paginas do HQBeds (`chrome.scripting.executeScript`) para capturar os dados visiveis na interface e montar os textos automaticamente.
 
 ## Observacao importante (limitacao tecnica)
 
@@ -31,7 +31,8 @@ A extensao e aberta no popup do Chrome e, quando acionada, injeta funcoes de lei
 ## Estrutura do projeto
 
 - `manifest.json` - configuracao da extensao
-- `popup.html` / `popup.js` - interface e acoes do usuario
+- `background.js` - service worker que configura a abertura do side panel
+- `popup.html` / `popup.js` - interface e acoes do usuario (renderizada no side panel)
 - `js/scrapers.js` - extracao de dados das paginas HQBeds
 - `js/generators.js` - geracao dos templates
 - `js/services.js` - regras auxiliares (deteccao de quarto, formatacao etc.)
