@@ -54,7 +54,26 @@ export const ERROR_MESSAGES = Object.freeze({
   BOOKING_MODAL_NOT_OPEN: '⚠️ Abra a modal de Nova Reserva no HQBed primeiro.',
   OCCUPANCY_PAGE_NOT_OPEN: '⚠️ Abra a página de Ocupação do HQBed para gerar o café.',
   CHECKIN_TOMORROW_PAGE_NOT_OPEN: '⚠️ Abra a página de Ocupação do HQBed para buscar os check-ins.',
+  CHECKIN_TOMORROW_TODAY_NOT_VISIBLE: '⚠️ Volte o mapa de ocupação para a data de hoje.',
   CHECKIN_TOMORROW_NO_GUESTS: '✅ Nenhum hóspede pendente de check-in amanhã.',
+});
+
+// ── Check-in scraping failures ──────────────────────────────────────────────
+
+// These values are duplicated as string literals inside
+// scrapeCheckinTomorrowGuests: the scraper is injected into the HQBed page and
+// cannot import anything, so it has no access to this module.
+export const CheckinScrapeFailure = Object.freeze({
+  OCCUPANCY_TABLE_NOT_FOUND: 'OCCUPANCY_TABLE_NOT_FOUND',
+  TODAY_COLUMN_NOT_VISIBLE: 'TODAY_COLUMN_NOT_VISIBLE',
+  TOMORROW_COLUMN_NOT_VISIBLE: 'TOMORROW_COLUMN_NOT_VISIBLE',
+});
+
+export const CHECKIN_FAILURE_MESSAGES = Object.freeze({
+  [CheckinScrapeFailure.OCCUPANCY_TABLE_NOT_FOUND]: ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN,
+  [CheckinScrapeFailure.TODAY_COLUMN_NOT_VISIBLE]: ERROR_MESSAGES.CHECKIN_TOMORROW_TODAY_NOT_VISIBLE,
+  [CheckinScrapeFailure.TOMORROW_COLUMN_NOT_VISIBLE]:
+    ERROR_MESSAGES.CHECKIN_TOMORROW_TODAY_NOT_VISIBLE,
 });
 
 export const SUCCESS_MESSAGE = '✅ Copiado! Cola direto no WhatsApp.';
