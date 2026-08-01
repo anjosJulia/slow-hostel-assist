@@ -12,5 +12,8 @@ PUBLICACAO.md
 # Dev reference files
 html-ref-modal-cotacao.html
 
+# HQBed page captures used as scraping fixtures — contain real guest data (PII)
+pages-example/
+
 # Build artifacts
 *.zip

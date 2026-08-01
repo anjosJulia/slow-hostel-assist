@@ -368,30 +368,70 @@ export async function scrapeBreakfastData() {
 }
 
 /**
- * Scrapes guests checking in tomorrow who have not yet completed check-in.
- * For each guest, fetches their phone number from the HQBed booking page.
+ * Scrapes bookings arriving tomorrow that have not completed check-in yet.
+ *
+ * A booking is a candidate when its cell in tomorrow's column is flagged as an
+ * arrival by HQBed, or when the booking simply is not present in today's column.
+ * Each candidate is then confirmed against its own booking page, which is the
+ * authoritative source for the arrival date, the untruncated guest name and the
+ * phone number.
+ *
+ * Returns { success: true, bookings } or { success: false, reason }, where
+ * reason mirrors CheckinScrapeFailure in constants.js — duplicated as string
+ * literals because this function cannot import anything (see below).
  *
  * IMPORTANT: This function is serialized and injected into the HQBed page via
  * chrome.scripting.executeScript. It MUST be completely self-contained —
  * no references to variables or imports outside this function body.
  */
 export async function scrapeCheckinTomorrowGuests() {
-  const occupancyTable = document.querySelector('table#occupancy');
-  if (!occupancyTable) return null;
-
   // ── Constants (defined inline — function must be self-contained) ────────
 
   const DATE_REGEX = /(\d{2})\/(\d{2})\/(\d{4})/;
   const HQBEDS_ORIGIN = 'https://admin.hqbeds.com.br';
 
-  // ── Helpers ─────────────────────────────────────────────────────────────
+  const RESERVATION_CELL_SELECTOR = '.room-occupancy-overview';
+
+  // HQBed flags the arrival cell with one of two classes: `bed_button_checkin`
+  // when the stay continues past that day, and `bed_button_checkin_checkout`
+  // for single-night stays. They are distinct class tokens, so matching only
+  // the first one silently misses every one-night arrival.
+  const ARRIVAL_CELL_CLASSES = ['bed_button_checkin', 'bed_button_checkin_checkout'];
+
+  // Mirrors HQBed's own cellStatus(): blocked beds and bookings already checked
+  // in or out are never pending arrivals.
+  const NON_ARRIVAL_CELL_CLASSES = [
+    'hidden',
+    'reserveBlock',
+    'bed_button_checkedin',
+    'bed_button_checkedout',
+  ];
+
+  // The booking page carries a fixed floating button pointing at HQBed's own
+  // support WhatsApp. Matching it would hand out the support number as if it
+  // were the guest's.
+  const SUPPORT_WHATSAPP_LINK_CLASS = 'wa-fab-button';
+
+  const ARRIVAL_DATE_REGEX = /Chegada:\s*(\d{2})\/(\d{2})\/(\d{4})/;
+  const PHONE_LABEL_REGEX = /^Telefone\s*(.+)$/;
+  const TRUNCATED_NAME_SUFFIX_REGEX = /[.\u2025\u2026]+$/;
+  const MINIMUM_PHONE_DIGIT_COUNT = 10;
+  const FETCH_BATCH_SIZE = 5;
+
+  const FailureReason = {
+    OCCUPANCY_TABLE_NOT_FOUND: 'OCCUPANCY_TABLE_NOT_FOUND',
+    TODAY_COLUMN_NOT_VISIBLE: 'TODAY_COLUMN_NOT_VISIBLE',
+    TOMORROW_COLUMN_NOT_VISIBLE: 'TOMORROW_COLUMN_NOT_VISIBLE',
+  };
+
+  // ── Occupancy map helpers ───────────────────────────────────────────────
 
   function extractGuestFirstName(bookingLink) {
     for (const node of Array.from(bookingLink.childNodes)) {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent.replace(/\u00a0/g, ' ').trim();
         if (text && !text.startsWith('(')) {
-          return text.replace(/[.\u2025\u2026]+$/, '').trim();
+          return text.replace(TRUNCATED_NAME_SUFFIX_REGEX, '').trim();
         }
       }
     }
@@ -399,27 +439,115 @@ export async function scrapeCheckinTomorrowGuests() {
       .split('\n')
       .map(s => s.trim())
       .find(s => s && !s.startsWith('('));
-    return (fallback ?? '').replace(/[.\u2025\u2026]+$/, '').trim();
+    return (fallback ?? '').replace(TRUNCATED_NAME_SUFFIX_REGEX, '').trim();
   }
 
-  async function fetchPhoneForGuest(guestBedId) {
+  function extractGuestQuantity(bookingLink) {
+    const fullText = bookingLink.textContent.replace(/\u00a0/g, ' ');
+    const match = fullText.match(/\((\d+)\)/);
+    if (match) {
+      const quantity = parseInt(match[1], 10);
+      if (quantity > 1) return quantity;
+    }
+    return 1;
+  }
+
+  function toFirstName(fullName) {
+    return fullName.split(/\s+/)[0].replace(TRUNCATED_NAME_SUFFIX_REGEX, '').trim();
+  }
+
+  function collectReservationDivs(tableRows, columnIndex) {
+    const reservationDivs = [];
+    for (const row of tableRows) {
+      const cell = row.children[columnIndex];
+      if (!cell) continue;
+      reservationDivs.push(...Array.from(cell.querySelectorAll(RESERVATION_CELL_SELECTOR)));
+    }
+    return reservationDivs;
+  }
+
+  function collectBookingIds(reservationDivs) {
+    const bookingIds = new Set();
+    for (const div of reservationDivs) {
+      const bookingId = div.getAttribute('data-booking-id');
+      if (bookingId) bookingIds.add(bookingId);
+    }
+    return bookingIds;
+  }
+
+  function isPendingArrival(reservationDiv, bookingId, todayBookingIds) {
+    if (NON_ARRIVAL_CELL_CLASSES.some(name => reservationDiv.classList.contains(name))) return false;
+    if (ARRIVAL_CELL_CLASSES.some(name => reservationDiv.classList.contains(name))) return true;
+    // Safety net: even if HQBed renames the arrival classes, a booking absent
+    // from today's column can only have started tomorrow.
+    return !todayBookingIds.has(bookingId);
+  }
+
+  // ── Booking page helpers ────────────────────────────────────────────────
+
+  function getOwnText(element) {
+    return Array.from(element.childNodes)
+      .filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent.replace(/\u00a0/g, ' '))
+      .join(' ')
+      .trim();
+  }
+
+  function findPhoneLabelElement(bookingDocument) {
+    const elements = Array.from(bookingDocument.querySelectorAll('div, span, p, td, li'));
+    return elements.find(element => PHONE_LABEL_REGEX.test(getOwnText(element))) ?? null;
+  }
+
+  function toPhoneDigits(rawPhone) {
+    const digits = rawPhone.replace(/\D/g, '');
+    return digits.length >= MINIMUM_PHONE_DIGIT_COUNT ? digits : null;
+  }
+
+  function extractPhoneFromLabel(phoneLabelElement) {
+    if (!phoneLabelElement) return null;
+    const match = getOwnText(phoneLabelElement).match(PHONE_LABEL_REGEX);
+    return match ? toPhoneDigits(match[1]) : null;
+  }
+
+  function extractPhoneFromWhatsAppLink(bookingDocument) {
+    const links = Array.from(bookingDocument.querySelectorAll('a[href*="whatsapp.com/send"]'));
+    for (const link of links) {
+      if (link.classList.contains(SUPPORT_WHATSAPP_LINK_CLASS)) continue;
+      const match = (link.getAttribute('href') ?? '').match(/[?&]phone=([^&]*)/);
+      if (!match) continue;
+      const digits = toPhoneDigits(decodeURIComponent(match[1]));
+      if (digits) return digits;
+    }
+    return null;
+  }
+
+  function extractGuestFullName(phoneLabelElement) {
+    const contactBlock = phoneLabelElement ? phoneLabelElement.parentElement : null;
+    if (!contactBlock) return '';
+    const nameElement = Array.from(contactBlock.querySelectorAll('strong')).find(
+      element => !element.textContent.includes('@'),
+    );
+    return nameElement ? nameElement.textContent.trim() : '';
+  }
+
+  // Returns the authoritative booking details, or null when the page cannot be read.
+  async function fetchBookingDetails(bookingId) {
     try {
-      const tooltipResponse = await fetch(`${HQBEDS_ORIGIN}/hq/occupancy/tooltip/${guestBedId}`);
-      if (!tooltipResponse.ok) throw new Error(`HQBed tooltip error: ${tooltipResponse.status}`);
-      const tooltipHtml = await tooltipResponse.text();
+      const response = await fetch(`${HQBEDS_ORIGIN}/hq/booking/${bookingId}`);
+      if (!response.ok) throw new Error(`HQBed booking error: ${response.status}`);
+      const bookingDocument = new DOMParser().parseFromString(await response.text(), 'text/html');
 
-      const bookingIdMatch = tooltipHtml.match(/\/hq\/booking\/(\d+)/);
-      if (!bookingIdMatch) return null;
+      const arrivalMatch = bookingDocument.body.textContent.match(ARRIVAL_DATE_REGEX);
+      const phoneLabelElement = findPhoneLabelElement(bookingDocument);
 
-      const bookingId = bookingIdMatch[1];
-      const bookingResponse = await fetch(`${HQBEDS_ORIGIN}/hq/booking/${bookingId}`);
-      if (!bookingResponse.ok) throw new Error(`HQBed booking error: ${bookingResponse.status}`);
-      const bookingHtml = await bookingResponse.text();
-
-      const phoneMatch = bookingHtml.match(/web\.whatsapp\.com\/send\?phone=([^&"]+)/);
-      if (!phoneMatch) return null;
-
-      return phoneMatch[1].replace(/\D/g, '');
+      return {
+        arrivalDateLabel: arrivalMatch
+          ? `${arrivalMatch[1]}/${arrivalMatch[2]}/${arrivalMatch[3]}`
+          : null,
+        fullName: extractGuestFullName(phoneLabelElement),
+        phone:
+          extractPhoneFromLabel(phoneLabelElement) ?? extractPhoneFromWhatsAppLink(bookingDocument),
+      };
     } catch {
       return null;
     }
@@ -427,8 +555,11 @@ export async function scrapeCheckinTomorrowGuests() {
 
   // ── Parse date columns from thead ───────────────────────────────────────
 
+  const occupancyTable = document.querySelector('table#occupancy');
+  if (!occupancyTable) return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
+
   const theadRow = occupancyTable.querySelector('thead tr:first-child');
-  if (!theadRow) return null;
+  if (!theadRow) return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
 
   const dateColumns = [];
   const headerCells = Array.from(theadRow.children);
@@ -444,10 +575,13 @@ export async function scrapeCheckinTomorrowGuests() {
     dateColumns.push({
       columnIndex: i,
       dateObject: new Date(year, month - 1, day),
+      label: `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`,
     });
   }
 
-  if (!dateColumns.length) return null;
+  if (!dateColumns.length) {
+    return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
+  }
 
   // ── Find today's column index, then tomorrow's ───────────────────────────
 
@@ -457,54 +591,86 @@ export async function scrapeCheckinTomorrowGuests() {
   const todayColumnIndex = dateColumns.findIndex(
     col => col.dateObject.getTime() === today.getTime(),
   );
-  if (todayColumnIndex === -1 || todayColumnIndex + 1 >= dateColumns.length) return null;
+  if (todayColumnIndex === -1) {
+    return { success: false, reason: FailureReason.TODAY_COLUMN_NOT_VISIBLE };
+  }
+  if (todayColumnIndex + 1 >= dateColumns.length) {
+    return { success: false, reason: FailureReason.TOMORROW_COLUMN_NOT_VISIBLE };
+  }
 
   const tomorrowColumn = dateColumns[todayColumnIndex + 1];
 
-  // ── Collect arriving guests from tomorrow's column ───────────────────────
+  // ── Collect candidate bookings from tomorrow's column ────────────────────
 
   const tableRows = Array.from(occupancyTable.querySelectorAll('tbody tr'));
-  const arrivingGuests = [];
+  const todayBookingIds = collectBookingIds(
+    collectReservationDivs(tableRows, dateColumns[todayColumnIndex].columnIndex),
+  );
 
-  for (const row of tableRows) {
-    const tomorrowCell = row.children[tomorrowColumn.columnIndex];
-    if (!tomorrowCell) continue;
+  // A booking can span several beds, so it shows up in several rows.
+  const candidatesByBookingId = new Map();
 
-    const checkinDivs = tomorrowCell.querySelectorAll(
-      '.room-occupancy-overview.bed_button_active.bed_button_checkin',
-    );
+  for (const reservationDiv of collectReservationDivs(tableRows, tomorrowColumn.columnIndex)) {
+    const bookingId = reservationDiv.getAttribute('data-booking-id');
+    if (!bookingId) continue;
+    if (!isPendingArrival(reservationDiv, bookingId, todayBookingIds)) continue;
 
-    for (const div of Array.from(checkinDivs)) {
-      if (div.classList.contains('hidden')) continue;
-      if (div.classList.contains('bed_button_checkedin')) continue;
+    const bookingLink = reservationDiv.querySelector('a.bookingInfo');
+    if (!bookingLink) continue;
 
-      const bookingLink = div.querySelector('a.bookingInfo');
-      if (!bookingLink) continue;
+    const firstName = toFirstName(extractGuestFirstName(bookingLink));
+    if (!firstName) continue;
 
-      const fullName = extractGuestFirstName(bookingLink);
-      if (!fullName) continue;
+    const guestCount = extractGuestQuantity(bookingLink);
+    const existingCandidate = candidatesByBookingId.get(bookingId);
 
-      const firstName = fullName.split(/\s+/)[0].replace(/[.\u2025\u2026]+$/, '');
-      if (!firstName) continue;
-
-      const dataHref = bookingLink.getAttribute('data-href') ?? '';
-      const guestBedIdMatch = dataHref.match(/\/(\d+)$/);
-      const guestBedId = guestBedIdMatch ? guestBedIdMatch[1] : null;
-
-      arrivingGuests.push({ firstName, guestBedId });
+    if (existingCandidate) {
+      existingCandidate.guestCount += guestCount;
+    } else {
+      candidatesByBookingId.set(bookingId, { bookingId, firstName, guestCount });
     }
   }
 
-  if (!arrivingGuests.length) return [];
+  const candidates = Array.from(candidatesByBookingId.values());
+  if (!candidates.length) return { success: true, bookings: [] };
 
-  // ── Fetch phone numbers in parallel ─────────────────────────────────────
+  // ── Confirm each candidate against its own booking page ──────────────────
 
-  const guestsWithPhones = await Promise.all(
-    arrivingGuests.map(async guest => ({
-      firstName: guest.firstName,
-      phone: guest.guestBedId ? await fetchPhoneForGuest(guest.guestBedId) : null,
-    })),
-  );
+  const bookings = [];
 
-  return guestsWithPhones;
+  for (let i = 0; i < candidates.length; i += FETCH_BATCH_SIZE) {
+    const batch = candidates.slice(i, i + FETCH_BATCH_SIZE);
+    const detailedBatch = await Promise.all(
+      batch.map(async candidate => ({
+        candidate,
+        details: await fetchBookingDetails(candidate.bookingId),
+      })),
+    );
+
+    for (const { candidate, details } of detailedBatch) {
+      // Unreadable booking page: keep the candidate, the map already flagged it.
+      if (!details) {
+        bookings.push({
+          firstName: candidate.firstName,
+          guestCount: candidate.guestCount,
+          phone: null,
+        });
+        continue;
+      }
+
+      if (details.arrivalDateLabel && details.arrivalDateLabel !== tomorrowColumn.label) continue;
+
+      const fullNameFirstName = details.fullName ? toFirstName(details.fullName) : '';
+
+      bookings.push({
+        firstName: fullNameFirstName || candidate.firstName,
+        guestCount: candidate.guestCount,
+        phone: details.phone,
+      });
+    }
+  }
+
+  bookings.sort((a, b) => a.firstName.localeCompare(b.firstName, 'pt-BR'));
+
+  return { success: true, bookings };
 }

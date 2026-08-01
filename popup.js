@@ -7,6 +7,7 @@ import {
   PRE_RESERVATION_ROOM_TYPE_LABELS,
   BREAKFAST_TAG_LABEL,
   ERROR_MESSAGES,
+  CHECKIN_FAILURE_MESSAGES,
   SUCCESS_MESSAGE,
   LOADING_MESSAGE,
 } from './js/constants.js';
@@ -88,6 +89,12 @@ function showResult(template, tagLabel) {
   };
 }
 
+// ── Shared page guards ───────────────────────────────────────────────────────
+
+function isOccupancyPage(tabUrl) {
+  return tabUrl.includes('hqbeds.com.br') && tabUrl.includes('/hq/occupancy');
+}
+
 // ── Check-in tomorrow flow ───────────────────────────────────────────────────
 
 function buildWhatsAppUrl(phone, firstName) {
@@ -105,7 +112,10 @@ function renderGuestCard(guest) {
 
   const name = document.createElement('div');
   name.className = 'guest-card-name';
-  name.textContent = guest.firstName;
+  name.textContent =
+    guest.guestCount > 1
+      ? `${guest.firstName} · ${guest.guestCount} hóspedes`
+      : guest.firstName;
 
   const row = document.createElement('div');
   row.className = 'guest-card-row';
@@ -137,12 +147,17 @@ function renderGuestCard(guest) {
   return card;
 }
 
-async function handleCheckinTomorrowGeneration(tabId) {
+async function handleCheckinTomorrowGeneration(activeTab) {
+  if (!isOccupancyPage(activeTab.url ?? '')) {
+    showError(ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN);
+    return;
+  }
+
   let frames;
 
   try {
     frames = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
+      target: { tabId: activeTab.id, allFrames: true },
       func: scrapeCheckinTomorrowGuests,
     });
   } catch {
@@ -150,14 +165,23 @@ async function handleCheckinTomorrowGeneration(tabId) {
     return;
   }
 
-  const scraped = frames.find(frame => frame.result !== null)?.result ?? null;
+  const results = frames.map(frame => frame.result).filter(result => result != null);
+  // The occupancy table lives in a single frame; the others report a failure.
+  const scraped = results.find(result => result.success) ?? results[0] ?? null;
 
-  if (scraped === null) {
-    showError(ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN);
+  if (!scraped) {
+    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
     return;
   }
 
-  if (scraped.length === 0) {
+  if (!scraped.success) {
+    showError(
+      CHECKIN_FAILURE_MESSAGES[scraped.reason] ?? ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN,
+    );
+    return;
+  }
+
+  if (scraped.bookings.length === 0) {
     statusMessage.className = 'status ok';
     statusMessage.textContent = ERROR_MESSAGES.CHECKIN_TOMORROW_NO_GUESTS;
     return;
@@ -166,7 +190,7 @@ async function handleCheckinTomorrowGeneration(tabId) {
   statusMessage.textContent = '';
   guestList.innerHTML = '';
 
-  for (const guest of scraped) {
+  for (const guest of scraped.bookings) {
     guestList.appendChild(renderGuestCard(guest));
   }
 }
@@ -174,8 +198,7 @@ async function handleCheckinTomorrowGeneration(tabId) {
 // ── Breakfast flow ───────────────────────────────────────────────────────────
 
 async function handleBreakfastGeneration(activeTab) {
-  const tabUrl = activeTab.url ?? '';
-  if (!tabUrl.includes('hqbeds.com.br') || !tabUrl.includes('/hq/occupancy')) {
+  if (!isOccupancyPage(activeTab.url ?? '')) {
     showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN);
     return;
   }
@@ -257,7 +280,7 @@ buttonGenerate.addEventListener('click', async () => {
   }
 
   if (activeTemplateMode === TemplateMode.CHECKIN_TOMORROW) {
-    await handleCheckinTomorrowGeneration(activeTab.id);
+    await handleCheckinTomorrowGeneration(activeTab);
   } else if (activeTemplateMode === TemplateMode.BREAKFAST) {
     await handleBreakfastGeneration(activeTab);
   } else {
