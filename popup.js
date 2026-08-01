@@ -7,6 +7,8 @@ import {
   PRE_RESERVATION_ROOM_TYPE_LABELS,
   BREAKFAST_TAG_LABEL,
   ERROR_MESSAGES,
+  BREAKFAST_FAILURE_MESSAGES,
+  BreakfastScrapeFailure,
   CHECKIN_FAILURE_MESSAGES,
   SUCCESS_MESSAGE,
   LOADING_MESSAGE,
@@ -67,7 +69,12 @@ buttonCheckinTomorrow.addEventListener('click', () => activateTemplateMode(Templ
 
 // ── Status helpers ───────────────────────────────────────────────────────────
 
-function showError(message) {
+// The diagnostic goes to the console, not the panel: three separate defects
+// once produced a byte-identical "wrong page" message, so the trace has to stay
+// reachable — just not in the operator's face.
+function showError(message, diagnostic = '') {
+  if (diagnostic) console.debug(`[Slow Hostel Assist] ${message} — ${diagnostic}`);
+
   statusMessage.className = 'status error';
   statusMessage.textContent = message;
   resultBox.style.display = 'none';
@@ -91,8 +98,104 @@ function showResult(template, tagLabel) {
 
 // ── Shared page guards ───────────────────────────────────────────────────────
 
-function isOccupancyPage(tabUrl) {
-  return tabUrl.includes('hqbeds.com.br') && tabUrl.includes('/hq/occupancy');
+const HQBEDS_HOST = 'hqbeds.com.br';
+
+// Chrome only exposes `tab.url` when the extension holds permission for that
+// tab, and in a side panel that permission is not re-granted on every tab
+// switch the way it was for the old action popup. A missing URL therefore means
+// "unknown", never "wrong page" — treating the two as the same is what made the
+// extension claim the occupancy page was closed while it was plainly open.
+// The URL is only ever used to rule a page OUT, never to rule it IN: whether
+// the occupancy map is really there is a question only the page can answer.
+function isDefinitelyDifferentSite(tabUrl) {
+  if (!tabUrl) return false;
+  try {
+    return !new URL(tabUrl).hostname.endsWith(HQBEDS_HOST);
+  } catch {
+    return false;
+  }
+}
+
+const NO_ACCESS_ERROR_PATTERNS = ['cannot access', 'not access', 'no tab with id'];
+
+/**
+ * Injects a scraper into every frame of the tab.
+ *
+ * Returns { success: true, frames } or { success: false, message }. Injection
+ * failing is a distinct problem from the page not holding the expected content,
+ * and the two must not collapse into a single message.
+ */
+async function injectScraper(tabId, scraper) {
+  try {
+    const frames = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: scraper,
+    });
+    return { success: true, frames };
+  } catch (error) {
+    const description = String(error?.message ?? error).toLowerCase();
+    const isAccessDenied = NO_ACCESS_ERROR_PATTERNS.some(pattern =>
+      description.includes(pattern),
+    );
+    return {
+      success: false,
+      message: isAccessDenied
+        ? ERROR_MESSAGES.EXTENSION_HAS_NO_ACCESS
+        : ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE,
+    };
+  }
+}
+
+/**
+ * Collects the results the frames actually produced.
+ *
+ * The HQBed page embeds a same-origin notifications iframe, so `allFrames`
+ * always yields bystander frames alongside the real one. Frames where the
+ * script threw report `result: undefined` rather than `null`, and frame order
+ * is not guaranteed — so both empty shapes must be dropped here, or a bystander
+ * frame ends up masking the frame that actually holds the occupancy map.
+ */
+function collectFrameResults(frames) {
+  return frames.map(frame => frame.result).filter(result => result != null);
+}
+
+// Both occupancy scrapers report OCCUPANCY_TABLE_NOT_FOUND when the frame they
+// landed in has no occupancy table at all. Every bystander frame answers that
+// way, so it means "wrong frame", not "wrong page", and such a frame must never
+// be allowed to speak for the tab: the frame that actually found the table is
+// the only authoritative one. Picking results[0] instead let a bystander report
+// "abra a página de Ocupação" while the real frame had a precise reason to give.
+const NOT_THE_OCCUPANCY_FRAME = 'OCCUPANCY_TABLE_NOT_FOUND';
+
+function selectOccupancyResult(frames) {
+  const results = collectFrameResults(frames);
+  return (
+    results.find(result => result.success === true) ??
+    results.find(result => result.reason !== NOT_THE_OCCUPANCY_FRAME) ??
+    results[0] ??
+    null
+  );
+}
+
+/**
+ * Builds a one-line trace of what the tab actually looked like.
+ *
+ * Every "wrong page" message so far has been the extension guessing, and each
+ * guess looked identical to the operator. The trace names the branch that fired
+ * so a failure can be read instead of re-derived.
+ */
+function describeAttempt(activeTab, frames) {
+  const parts = [`url:${activeTab.url ? 'ok' : 'oculta'}`];
+
+  if (frames) {
+    parts.push(`frames:${frames.length}`);
+    const reasons = collectFrameResults(frames).map(result =>
+      result.success === true ? 'ok' : (result.reason ?? 'sem-motivo'),
+    );
+    parts.push(`resultados:${reasons.length ? reasons.join(',') : 'nenhum'}`);
+  }
+
+  return parts.join(' · ');
 }
 
 // ── Check-in tomorrow flow ───────────────────────────────────────────────────
@@ -148,35 +251,30 @@ function renderGuestCard(guest) {
 }
 
 async function handleCheckinTomorrowGeneration(activeTab) {
-  if (!isOccupancyPage(activeTab.url ?? '')) {
-    showError(ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN);
+  if (isDefinitelyDifferentSite(activeTab.url)) {
+    showError(ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN, describeAttempt(activeTab));
     return;
   }
 
-  let frames;
+  const injection = await injectScraper(activeTab.id, scrapeCheckinTomorrowGuests);
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId: activeTab.id, allFrames: true },
-      func: scrapeCheckinTomorrowGuests,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+  if (!injection.success) {
+    showError(injection.message, describeAttempt(activeTab));
     return;
   }
 
-  const results = frames.map(frame => frame.result).filter(result => result != null);
-  // The occupancy table lives in a single frame; the others report a failure.
-  const scraped = results.find(result => result.success) ?? results[0] ?? null;
+  const trace = describeAttempt(activeTab, injection.frames);
+  const scraped = selectOccupancyResult(injection.frames);
 
   if (!scraped) {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE, trace);
     return;
   }
 
   if (!scraped.success) {
     showError(
       CHECKIN_FAILURE_MESSAGES[scraped.reason] ?? ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN,
+      trace,
     );
     return;
   }
@@ -197,28 +295,42 @@ async function handleCheckinTomorrowGeneration(activeTab) {
 
 // ── Breakfast flow ───────────────────────────────────────────────────────────
 
+// Adds the dates HQBed is actually showing, so "volte para hoje" is actionable
+// instead of leaving the operator guessing where the map drifted to.
+function describeBreakfastFailure(scraped) {
+  const message =
+    BREAKFAST_FAILURE_MESSAGES[scraped.reason] ?? ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN;
+
+  if (scraped.reason === BreakfastScrapeFailure.TODAY_COLUMN_NOT_VISIBLE && scraped.visibleRange) {
+    return `${message} (mostrando ${scraped.visibleRange.from} a ${scraped.visibleRange.to})`;
+  }
+
+  return message;
+}
+
 async function handleBreakfastGeneration(activeTab) {
-  if (!isOccupancyPage(activeTab.url ?? '')) {
-    showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN);
+  if (isDefinitelyDifferentSite(activeTab.url)) {
+    showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN, describeAttempt(activeTab));
     return;
   }
 
-  let frames;
+  const injection = await injectScraper(activeTab.id, scrapeBreakfastData);
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId: activeTab.id, allFrames: true },
-      func: scrapeBreakfastData,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+  if (!injection.success) {
+    showError(injection.message, describeAttempt(activeTab));
     return;
   }
 
-  const scraped = frames.find(frame => frame.result !== null)?.result ?? null;
+  const trace = describeAttempt(activeTab, injection.frames);
+  const scraped = selectOccupancyResult(injection.frames);
 
   if (!scraped) {
-    showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN);
+    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE, trace);
+    return;
+  }
+
+  if (!scraped.success) {
+    showError(describeBreakfastFailure(scraped), trace);
     return;
   }
 
@@ -228,22 +340,19 @@ async function handleBreakfastGeneration(activeTab) {
 
 // ── Quote / Pre-reservation flow ─────────────────────────────────────────────
 
-async function handleReservationGeneration(tabId, mode) {
-  let frames;
+const UNKNOWN_SCRAPED_VALUE = '???';
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: scrapeReservationData,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+async function handleReservationGeneration(tabId, mode) {
+  const injection = await injectScraper(tabId, scrapeReservationData);
+
+  if (!injection.success) {
+    showError(injection.message);
     return;
   }
 
-  const scraped = frames.find(
-    frame => frame.result !== null && frame.result.checkIn !== '???',
-  )?.result ?? null;
+  const scraped = collectFrameResults(injection.frames).find(
+    result => result.checkIn !== UNKNOWN_SCRAPED_VALUE,
+  ) ?? null;
 
   if (!scraped) {
     showError(ERROR_MESSAGES.BOOKING_MODAL_NOT_OPEN);
