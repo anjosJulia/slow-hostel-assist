@@ -1,7 +1,8 @@
 import { scrapeReservationData, scrapeBreakfastData, scrapeCheckinTomorrowGuests } from './js/scrapers.js';
 import { detectRoomType, formatArrivalsSummary, nextDay } from './js/services.js';
 import { generateQuote, generatePreReservation, generateBreakfastList, generateCheckinMessage } from './js/generators.js';
-import { focusOrOpenHqbedTab, reloadActiveTab } from './js/hqbed-tab.js';
+import { focusOrOpenHqbedTab, reloadActiveTab, resolveTabToRead } from './js/hqbed-tab.js';
+import { recordAttempt, readAttempts, clearAttempts } from './js/diagnostics.js';
 import { PanelView } from './js/ui/panel-view.js';
 import {
   TemplateMode,
@@ -18,6 +19,9 @@ import {
 // ── Template mode state ──────────────────────────────────────────────────────
 
 let activeTemplateMode = TemplateMode.QUOTE;
+
+// Which tabs.query answered on the current attempt — see resolveTabToRead.
+let activeTabSource = 'none';
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
@@ -135,27 +139,34 @@ function selectOccupancyResult(frames) {
 }
 
 /**
- * One-line trace of what the tab actually looked like, for the console.
+ * Structured trace of what the tab actually looked like.
  *
  * Several distinct defects produce a byte-identical "wrong page" notice, which
  * makes them indistinguishable in the field. This names the branch that fired.
  */
 function describeAttempt(activeTab, frames) {
-  const parts = [`url:${activeTab.url ? 'ok' : 'oculta'}`];
+  const trace = {
+    mode: activeTemplateMode,
+    tabSource: activeTabSource,
+    url: activeTab?.url ? 'ok' : 'oculta',
+    tabStatus: activeTab?.status ?? 'desconhecido',
+  };
 
   if (frames) {
-    const reasons = collectFrameResults(frames).map(result =>
+    trace.frames = frames.length;
+    trace.results = collectFrameResults(frames).map(result =>
       result.success === true ? 'ok' : (result.reason ?? 'sem-motivo'),
     );
-    parts.push(`frames:${frames.length}`);
-    parts.push(`resultados:${reasons.length ? reasons.join(',') : 'nenhum'}`);
   }
 
-  return parts.join(' · ');
+  return trace;
 }
 
-function showNotice(notice, diagnostic) {
-  if (diagnostic) console.debug(`[Slow Hostel Assist] ${notice.title} — ${diagnostic}`);
+// Every outcome is recorded, not just failures: a bug that vanishes while the
+// console is open can only be read from what a *successful* run looked like
+// next to a failing one.
+function showNotice(notice, trace) {
+  recordAttempt({ outcome: 'notice', notice: notice.title, ...trace });
   view.showNotice(notice);
 }
 
@@ -203,6 +214,8 @@ async function handleCheckinTomorrowGeneration(activeTab) {
     return;
   }
 
+  recordAttempt({ outcome: 'ok', bookings: scraped.bookings.length, ...trace });
+
   if (scraped.bookings.length === 0) {
     view.showIdle();
     view.showFeedback(CHECKIN_TOMORROW_NO_GUESTS_MESSAGE);
@@ -241,6 +254,8 @@ async function handleBreakfastGeneration(activeTab) {
     return;
   }
 
+  recordAttempt({ outcome: 'ok', days: scraped.days.length, ...trace });
+
   view.showResult(generateBreakfastList(scraped), BREAKFAST_TAG_LABEL);
 }
 
@@ -248,22 +263,26 @@ async function handleBreakfastGeneration(activeTab) {
 
 const UNKNOWN_SCRAPED_VALUE = '???';
 
-async function handleReservationGeneration(tabId, mode) {
-  const injection = await injectScraper(tabId, scrapeReservationData);
+async function handleReservationGeneration(activeTab, mode) {
+  const injection = await injectScraper(activeTab.id, scrapeReservationData);
 
   if (!injection.success) {
-    view.showNotice(injection.notice);
+    showNotice(injection.notice, describeAttempt(activeTab));
     return;
   }
+
+  const trace = describeAttempt(activeTab, injection.frames);
 
   const scraped = collectFrameResults(injection.frames).find(
     result => result.checkIn !== UNKNOWN_SCRAPED_VALUE,
   ) ?? null;
 
   if (!scraped) {
-    view.showNotice(NOTICES.BOOKING_MODAL_NOT_OPEN);
+    showNotice(NOTICES.BOOKING_MODAL_NOT_OPEN, trace);
     return;
   }
+
+  recordAttempt({ outcome: 'ok', ...trace });
 
   const roomType = detectRoomType(scraped.roomName);
   const showDiscountToGuest = view.isDiscountVisibleToGuest;
@@ -286,10 +305,11 @@ async function handleReservationGeneration(tabId, mode) {
 async function generateForActiveMode() {
   view.showLoading();
 
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const { tab: activeTab, source } = await resolveTabToRead();
+  activeTabSource = source;
 
   if (!activeTab?.id) {
-    view.showNotice(NOTICES.PAGE_NOT_ACCESSIBLE);
+    showNotice(NOTICES.PAGE_NOT_ACCESSIBLE, describeAttempt(activeTab));
     return;
   }
 
@@ -303,5 +323,15 @@ async function generateForActiveMode() {
     return;
   }
 
-  await handleReservationGeneration(activeTab.id, activeTemplateMode);
+  await handleReservationGeneration(activeTab, activeTemplateMode);
 }
+
+// Reading the record needs no UI: the operator hits this failure with the
+// console closed, then opens it afterwards and runs one command.
+globalThis.slowHostelDiagnostics = async () => {
+  const attempts = await readAttempts();
+  console.table(attempts);
+  return attempts;
+};
+
+globalThis.slowHostelDiagnosticsClear = clearAttempts;

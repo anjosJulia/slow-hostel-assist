@@ -3,7 +3,7 @@
   "name": "Slow Hostel Assist",
   "version": "1.0",
   "description": "Gera template de orçamento para WhatsApp a partir do HQBed",
-  "permissions": ["activeTab", "scripting", "clipboardWrite", "sidePanel"],
+  "permissions": ["activeTab", "scripting", "clipboardWrite", "sidePanel", "storage"],
   "host_permissions": [
     "https://admin.hqbeds.com.br/*"
   ],
