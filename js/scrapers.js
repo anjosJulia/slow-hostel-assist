@@ -247,11 +247,7 @@ export async function scrapeBreakfastData() {
   // HQBed renders only the ten days starting at the map's current start date,
   // so paging the map forward or back removes today's column from the DOM.
   if (todayColumnIndex === -1) {
-    return {
-      success: false,
-      reason: FailureReason.TODAY_COLUMN_NOT_VISIBLE,
-      visibleRange: { from: dateColumns[0].label, to: dateColumns[dateColumns.length - 1].label },
-    };
+    return { success: false, reason: FailureReason.TODAY_COLUMN_NOT_VISIBLE };
   }
 
   // ── Pre-scan: resolve room short label per table-color-N class ──────────

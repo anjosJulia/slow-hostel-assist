@@ -11,11 +11,13 @@ Reduzir o tempo operacional e evitar erros de digitacao/copy-paste no atendiment
 - Geracao de template de **orcamento**
 - Geracao de template de **pre-reserva**
 - Geracao de **lista de cafe da manha** (1 a 3 dias)
+- Lista de **check-ins de amanha** com botao direto para o WhatsApp
+- Edicao do texto antes de copiar (vale so para aquele envio)
 - Copia rapida para area de transferencia
 
 ## Como funciona
 
-A extensao e aberta no popup do Chrome e, quando acionada, injeta funcoes de leitura nas paginas do HQBeds (`chrome.scripting.executeScript`) para capturar os dados visiveis na interface e montar os textos automaticamente.
+A extensao abre em um painel lateral fixo do Chrome (side panel), que permanece aberto mesmo ao clicar na pagina — so fecha quando o icone da extensao e clicado novamente ou o painel e fechado manualmente. Quando acionada, ela injeta funcoes de leitura nas paginas do HQBeds (`chrome.scripting.executeScript`) para capturar os dados visiveis na interface e montar os textos automaticamente.
 
 ## Observacao importante (limitacao tecnica)
 
@@ -31,7 +33,16 @@ A extensao e aberta no popup do Chrome e, quando acionada, injeta funcoes de lei
 ## Estrutura do projeto
 
 - `manifest.json` - configuracao da extensao
-- `popup.html` / `popup.js` - interface e acoes do usuario
+- `background.js` - service worker que configura a abertura do side panel
+- `popup.html` - marcacao do side panel (sem estilo inline)
+- `popup.js` - orquestracao dos fluxos (scraping -> geracao -> exibicao)
+- `css/tokens.css` - design tokens do sistema Organic + fontes locais
+- `css/panel.css` - componentes visuais do painel
+- `fonts/` - Caprasimo e Figtree em woff2, servidos pela propria extensao
+- `js/ui/panel-view.js` - camada de apresentacao (estados da tela e rodape)
+- `js/ui/guest-card.js` - card de hospede da lista de check-in
+- `js/ui/icons.js` - icones SVG inline
+- `js/hqbed-tab.js` - acoes de recuperacao (ir para o HQBed, recarregar aba)
 - `js/scrapers.js` - extracao de dados das paginas HQBeds
 - `js/generators.js` - geracao dos templates
 - `js/services.js` - regras auxiliares (deteccao de quarto, formatacao etc.)
