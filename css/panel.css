@@ -1,0 +1,799 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Side panel components. Every colour, radius and spacing comes from
+   tokens.css — no literals here.
+
+   Layout contract: the panel is a full-height column of three bands —
+   header, scrolling body, pinned footer. The body is the only scroller, so
+   the primary action never leaves the viewport no matter how long the
+   generated template is.
+   ────────────────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+/* — header ───────────────────────────────────────────────────────────────
+   Just the hostel symbol, centred. Chrome already prints "Slow Hostel
+   Assist" in the side panel's own title bar, so a wordmark here would be the
+   name twice on the same 340px.
+
+   Two densities: roomy while idle, compact once a result is on screen, so
+   the template gets the vertical space. Driven by .panel--compact on <body>.
+*/
+
+.panel-header {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4) var(--space-4) 13px;
+}
+
+/* symbol.png is the mark cut out of the full lockup, on transparency — it
+   reads straight on the warm ground with no plate behind it. */
+.panel-header__symbol {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  transition: width var(--transition-fast), height var(--transition-fast);
+}
+
+.panel--compact .panel-header {
+  padding: 11px var(--space-4) 9px;
+}
+
+.panel--compact .panel-header__symbol {
+  width: 28px;
+  height: 28px;
+}
+
+/* — mode selector ────────────────────────────────────────────────────────
+   Idle: labelled tiles under group headings, so a new staff member can tell
+   the four modes apart. Compact: an icon rail where only the active mode
+   keeps its label, which buys back a whole band of height for the result.
+
+   Both layouts are the same four buttons. The group wrappers collapse with
+   `display: contents` instead of the panel rendering a second set of tiles —
+   one button per mode means one listener and no state to keep in sync.
+*/
+
+.mode-selector {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) 12px;
+}
+
+.mode-group__label {
+  margin-bottom: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+}
+
+.mode-group__options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.mode-tile {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 10px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--color-neutral-700);
+  background: var(--color-neutral-100);
+  border: 1.5px solid transparent;
+  border-radius: 14px;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.mode-tile:hover {
+  background: var(--color-neutral-200);
+}
+
+.mode-tile svg {
+  flex: none;
+}
+
+.mode-tile.is-active {
+  color: var(--color-accent-800);
+  background: var(--color-accent-200);
+  border-color: var(--color-accent-500);
+}
+
+.mode-tile__label {
+  white-space: nowrap;
+}
+
+/* Compact: the groups dissolve and the tiles line up as pills. */
+.panel--compact .mode-selector {
+  flex-direction: row;
+  gap: 6px;
+  padding-bottom: 11px;
+}
+
+.panel--compact .mode-group,
+.panel--compact .mode-group__options {
+  display: contents;
+}
+
+.panel--compact .mode-group__label {
+  display: none;
+}
+
+.panel--compact .mode-tile {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--color-neutral-600);
+}
+
+.panel--compact .mode-tile.is-active {
+  display: flex;
+  gap: 7px;
+  width: auto;
+  padding: 0 13px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-accent-800);
+  background: var(--color-accent-200);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent-500);
+}
+
+.panel--compact .mode-tile:not(.is-active) .mode-tile__label {
+  display: none;
+}
+
+/* The selector dims while a template is being built — the modes stay
+   readable but clearly out of play until the result lands. */
+.panel--busy .mode-selector {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* — body ─────────────────────────────────────────────────────────────── */
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 var(--space-4) 14px;
+  overflow: auto;
+}
+
+.panel-spacer {
+  flex: 1;
+}
+
+.panel-hint {
+  padding: 0 var(--space-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--color-neutral-500);
+}
+
+/* — option toggle ──────────────────────────────────────────────────────── */
+
+.option-toggle {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 46px;
+  margin-top: var(--space-2);
+  padding: 12px 13px;
+  background: var(--color-neutral-100);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.option-toggle:hover {
+  background: var(--color-neutral-200);
+}
+
+.option-toggle input {
+  flex: none;
+  width: 19px;
+  height: 19px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.option-toggle__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-neutral-800);
+}
+
+/* — result card ──────────────────────────────────────────────────────────
+   The card owns its own scroller. The template can be forty lines long and
+   the copy button still sits where the operator left it.
+*/
+
+.result-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-neutral-100);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.result-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px 10px 9px 13px;
+  border-bottom: 1px solid var(--color-neutral-300);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.result-card__actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-2-200);
+  color: var(--color-accent-2-800);
+}
+
+.tag--accent {
+  background: var(--color-accent-200);
+  color: var(--color-accent-800);
+}
+
+.tag--editing {
+  background: var(--color-accent-500);
+  color: #fff;
+}
+
+.tag--muted {
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-500);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--color-neutral-700);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.icon-button:hover {
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-neutral-900);
+}
+
+.result-card__text {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  color: var(--color-neutral-800);
+  background: transparent;
+  border: none;
+  resize: none;
+}
+
+/* — editing state ────────────────────────────────────────────────────────
+   Same card, re-dressed. Keeping one element for read and edit means the
+   scroll position and text metrics do not jump when the operator toggles.
+*/
+
+.result-card.is-editing {
+  border-color: var(--color-accent-500);
+  box-shadow: 0 0 0 3px var(--color-accent-200);
+}
+
+.result-card.is-editing .result-card__header {
+  background: var(--color-accent-100);
+  border-color: var(--color-accent-300);
+}
+
+.result-card.is-editing .result-card__text {
+  background: #fff;
+  color: var(--color-neutral-900);
+}
+
+.link-button {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-neutral-600);
+  border-radius: var(--radius-pill);
+}
+
+.link-button:hover {
+  color: var(--color-neutral-900);
+}
+
+/* — skeleton ─────────────────────────────────────────────────────────── */
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px;
+}
+
+.skeleton__line {
+  height: 11px;
+  background: var(--color-neutral-200);
+  border-radius: var(--radius-pill);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.skeleton__line:nth-child(1) { width: 62%; }
+.skeleton__line:nth-child(2) { width: 90%; animation-delay: 0.1s; }
+.skeleton__line:nth-child(3) { width: 80%; animation-delay: 0.2s; }
+.skeleton__line:nth-child(4) { width: 48%; animation-delay: 0.3s; }
+.skeleton__line:nth-child(5) { width: 70%; animation-delay: 0.4s; }
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.loading-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-neutral-700);
+}
+
+/* — feedback banner ──────────────────────────────────────────────────── */
+
+.feedback {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-2-200);
+  color: var(--color-accent-2-800);
+}
+
+.feedback svg {
+  flex: none;
+}
+
+.feedback--warning {
+  background: var(--color-accent-200);
+  color: var(--color-accent-800);
+}
+
+/* — notice ───────────────────────────────────────────────────────────────
+   A warning states what to do next, not only what went wrong: title is the
+   instruction, body is the why, and the two buttons perform the fix.
+*/
+
+.notice {
+  display: flex;
+  gap: 11px;
+  padding: 14px;
+  background: var(--color-accent-100);
+  border: 1px solid var(--color-accent-300);
+  border-radius: var(--radius-lg);
+}
+
+.notice svg {
+  flex: none;
+  color: var(--color-accent-600);
+}
+
+.notice__content {
+  min-width: 0;
+}
+
+.notice__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-accent-800);
+}
+
+.notice__body {
+  margin-top: 3px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-neutral-700);
+}
+
+.notice-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.btn-outline {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-neutral-700);
+  border: 1.5px solid var(--color-neutral-400);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition-fast);
+}
+
+.btn-outline:hover {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
+.btn-outline--accent {
+  color: var(--color-accent-700);
+  border-color: var(--color-accent-500);
+}
+
+.btn-outline--accent:hover {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+/* — check-in guest list ──────────────────────────────────────────────── */
+
+.checkin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guest-list-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.guest-list-heading__title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-neutral-800);
+}
+
+.guest-list-heading__meta {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-neutral-500);
+}
+
+.guest-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guest-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  background: var(--color-neutral-100);
+  border: 1px solid var(--color-neutral-300);
+  border-radius: 18px;
+}
+
+/* Dashed edge flags the cards that still need the operator to type
+   something before the WhatsApp button does anything. */
+.guest-card--needs-phone {
+  border-style: dashed;
+  border-color: var(--color-accent-400);
+}
+
+.guest-card__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.guest-card__name {
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.guest-card__tag {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10px;
+  background: var(--color-neutral-200);
+  color: var(--color-neutral-700);
+}
+
+.guest-card__row {
+  display: flex;
+  gap: 7px;
+}
+
+.guest-phone-input {
+  flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 14px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-neutral-800);
+  background: #fff;
+  border: 1px solid var(--color-neutral-400);
+  border-radius: var(--radius-pill);
+}
+
+.guest-phone-input::placeholder {
+  color: var(--color-neutral-500);
+}
+
+.guest-phone-input:focus-visible {
+  border-color: var(--color-accent);
+  outline-offset: 0;
+}
+
+.btn-whatsapp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--color-accent-2-600);
+  border-radius: var(--radius-pill);
+  transition: background var(--transition-fast);
+}
+
+.btn-whatsapp:hover {
+  background: var(--color-accent-2-700);
+}
+
+.btn-whatsapp:disabled {
+  color: var(--color-neutral-600);
+  background: var(--color-neutral-300);
+  cursor: not-allowed;
+}
+
+/* — footer ───────────────────────────────────────────────────────────── */
+
+.panel-footer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 11px var(--space-4) 14px;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-divider);
+}
+
+.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 46px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--color-accent);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast);
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-600);
+}
+
+.btn-primary:active {
+  background: var(--color-accent-700);
+}
+
+.btn-primary:disabled {
+  color: var(--color-neutral-100);
+  background: var(--color-neutral-400);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* Copy is the confirming action, so it takes the olive accent and leaves
+   terracotta to mean "do the work". */
+.btn-primary--confirm {
+  background: var(--color-accent-2-600);
+}
+
+.btn-primary--confirm:hover {
+  background: var(--color-accent-2-700);
+}
+
+.btn-primary--confirm:active {
+  background: var(--color-accent-2-800);
+}
+
+/* The icon slots are swapped per state, so they stay flex items in their own
+   right — an inline span would drop the svg onto the text baseline. */
+.btn-primary__icon,
+.btn-quiet__icon {
+  display: flex;
+}
+
+.btn-quiet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-neutral-600);
+}
+
+.btn-quiet:hover {
+  color: var(--color-neutral-900);
+}
+
+/* — widened panel ────────────────────────────────────────────────────────
+   Chrome lets the operator drag the side panel wider. Past 440px the four
+   modes fit on one line as labelled tiles, and the footer can put the
+   secondary action beside the primary one instead of under it.
+*/
+
+@media (min-width: 440px) {
+  .panel-header {
+    padding: 14px 18px 12px;
+  }
+
+  .panel--compact .panel-header {
+    padding: 12px 18px 10px;
+  }
+
+  /* Wide enough for the four modes on one line — the group headings stop
+     earning their space and every tile keeps its label, compact or not. */
+  .mode-selector,
+  .panel--compact .mode-selector {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-2);
+    padding: 0 18px 12px;
+  }
+
+  .mode-group,
+  .mode-group__options {
+    display: contents;
+  }
+
+  .mode-group__label {
+    display: none;
+  }
+
+  .panel--compact .mode-tile,
+  .panel--compact .mode-tile.is-active {
+    display: flex;
+    justify-content: flex-start;
+    gap: 7px;
+    width: auto;
+    min-height: 44px;
+    height: auto;
+    padding: 10px 11px;
+    font-size: 12.5px;
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  .panel--compact .mode-tile {
+    background: var(--color-neutral-100);
+  }
+
+  .panel--compact .mode-tile.is-active {
+    background: var(--color-accent-200);
+    border: 1.5px solid var(--color-accent-500);
+  }
+
+  .panel--compact .mode-tile:not(.is-active) .mode-tile__label {
+    display: inline;
+  }
+
+  .panel-body {
+    padding: 0 18px 14px;
+  }
+
+  .panel-footer {
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 11px 18px 14px;
+  }
+
+  .panel-footer .btn-primary {
+    flex: 1;
+  }
+
+  .panel-footer .btn-quiet {
+    flex: none;
+  }
+}

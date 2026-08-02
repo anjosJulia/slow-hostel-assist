@@ -1,98 +1,162 @@
 import { scrapeReservationData, scrapeBreakfastData, scrapeCheckinTomorrowGuests } from './js/scrapers.js';
-import { detectRoomType } from './js/services.js';
+import { detectRoomType, formatArrivalsSummary, nextDay } from './js/services.js';
 import { generateQuote, generatePreReservation, generateBreakfastList, generateCheckinMessage } from './js/generators.js';
+import { focusOrOpenHqbedTab, reloadActiveTab } from './js/hqbed-tab.js';
+import { PanelView } from './js/ui/panel-view.js';
 import {
   TemplateMode,
   QUOTE_ROOM_TYPE_LABELS,
   PRE_RESERVATION_ROOM_TYPE_LABELS,
   BREAKFAST_TAG_LABEL,
-  ERROR_MESSAGES,
-  CHECKIN_FAILURE_MESSAGES,
-  SUCCESS_MESSAGE,
-  LOADING_MESSAGE,
+  NOTICES,
+  BREAKFAST_FAILURE_NOTICES,
+  CHECKIN_FAILURE_NOTICES,
+  CHECKIN_TOMORROW_NO_GUESTS_MESSAGE,
+  COPY_FAILED_MESSAGE,
 } from './js/constants.js';
-
-// ── DOM element references ───────────────────────────────────────────────────
-
-const buttonQuote = document.getElementById('btn-select-quote');
-const buttonPreReservation = document.getElementById('btn-select-pre-reservation');
-const buttonBreakfast = document.getElementById('btn-select-breakfast');
-const buttonCheckinTomorrow = document.getElementById('btn-select-checkin-tomorrow');
-const buttonGenerate = document.getElementById('btn-generate');
-const buttonCopy = document.getElementById('btn-copy');
-const resultBox = document.getElementById('result-box');
-const resultText = document.getElementById('result-content');
-const resultTypeTag = document.getElementById('tag-type');
-const statusMessage = document.getElementById('status');
-const optionShowDiscount = document.getElementById('option-show-discount');
-const checkboxShowDiscount = document.getElementById('checkbox-show-discount');
-const checkinSection = document.getElementById('checkin-section');
-const guestList = document.getElementById('guest-list');
 
 // ── Template mode state ──────────────────────────────────────────────────────
 
 let activeTemplateMode = TemplateMode.QUOTE;
 
-// ── Template selector buttons ────────────────────────────────────────────────
+// ── View ─────────────────────────────────────────────────────────────────────
 
-const SELECTOR_BUTTONS = {
-  [TemplateMode.QUOTE]: buttonQuote,
-  [TemplateMode.PRE_RESERVATION]: buttonPreReservation,
-  [TemplateMode.BREAKFAST]: buttonBreakfast,
-  [TemplateMode.CHECKIN_TOMORROW]: buttonCheckinTomorrow,
-};
+const view = new PanelView({
+  onModeChange: mode => {
+    activeTemplateMode = mode;
+    view.setActiveMode(mode);
+  },
+  onGenerate: () => generateForActiveMode(),
+  onCopy: template => copyToClipboard(template),
+  onOpenHqbed: () => focusOrOpenHqbedTab(),
+  onReloadTab: () => reloadActiveTab(),
+  onOpenConversation: (phone, guest) => openWhatsAppConversation(phone, guest.firstName),
+});
 
-function activateTemplateMode(mode) {
-  activeTemplateMode = mode;
+view.setActiveMode(activeTemplateMode);
 
-  for (const [buttonMode, button] of Object.entries(SELECTOR_BUTTONS)) {
-    button.classList.toggle('active', buttonMode === mode);
+// ── Clipboard ────────────────────────────────────────────────────────────────
+
+// The banner is only shown once the write actually succeeded — a silent
+// failure here would send the operator to WhatsApp to paste nothing.
+async function copyToClipboard(template) {
+  try {
+    await navigator.clipboard.writeText(template);
+  } catch (error) {
+    console.debug('Clipboard write failed', error);
+    // Warning, not a notice: the notice screen would hide the very card the
+    // operator now has to select by hand.
+    view.showWarning(COPY_FAILED_MESSAGE);
+    return;
   }
 
-  const isCheckinMode = mode === TemplateMode.CHECKIN_TOMORROW;
-
-  optionShowDiscount.style.display = mode === TemplateMode.QUOTE ? 'flex' : 'none';
-  resultBox.style.display = 'none';
-  buttonCopy.style.display = 'none';
-  checkinSection.style.display = isCheckinMode ? 'flex' : 'none';
-  guestList.innerHTML = '';
-  statusMessage.textContent = '';
-  statusMessage.className = 'status';
-}
-
-buttonQuote.addEventListener('click', () => activateTemplateMode(TemplateMode.QUOTE));
-buttonPreReservation.addEventListener('click', () => activateTemplateMode(TemplateMode.PRE_RESERVATION));
-buttonBreakfast.addEventListener('click', () => activateTemplateMode(TemplateMode.BREAKFAST));
-buttonCheckinTomorrow.addEventListener('click', () => activateTemplateMode(TemplateMode.CHECKIN_TOMORROW));
-
-// ── Status helpers ───────────────────────────────────────────────────────────
-
-function showError(message) {
-  statusMessage.className = 'status error';
-  statusMessage.textContent = message;
-  resultBox.style.display = 'none';
-  buttonCopy.style.display = 'none';
-}
-
-function showResult(template, tagLabel) {
-  resultText.textContent = template;
-  resultTypeTag.textContent = tagLabel;
-  resultBox.style.display = 'block';
-  buttonCopy.style.display = 'flex';
-  statusMessage.textContent = '';
-
-  buttonCopy.onclick = () => {
-    navigator.clipboard.writeText(template).then(() => {
-      statusMessage.className = 'status ok';
-      statusMessage.textContent = SUCCESS_MESSAGE;
-    });
-  };
+  view.showFeedback();
 }
 
 // ── Shared page guards ───────────────────────────────────────────────────────
 
-function isOccupancyPage(tabUrl) {
-  return tabUrl.includes('hqbeds.com.br') && tabUrl.includes('/hq/occupancy');
+const HQBEDS_HOST = 'hqbeds.com.br';
+
+// Chrome only exposes `tab.url` while the extension holds permission for that
+// tab, and the side panel — unlike the action popup it replaced — is not
+// re-granted `activeTab` when it is closed and reopened, or when the operator
+// switches tabs. A missing URL therefore means "unknown", never "wrong page";
+// conflating the two is what made the panel insist the occupancy map was closed
+// while it was plainly on screen.
+//
+// So the URL may only ever rule a page OUT, never rule it IN. Whether the
+// occupancy map is really there is a question only the page can answer, and
+// the injected scraper is what asks it.
+function isDefinitelyDifferentSite(tabUrl) {
+  if (!tabUrl) return false;
+  try {
+    return !new URL(tabUrl).hostname.endsWith(HQBEDS_HOST);
+  } catch {
+    return false;
+  }
+}
+
+const NO_ACCESS_ERROR_PATTERNS = ['cannot access', 'not access', 'no tab with id'];
+
+/**
+ * Injects a scraper into every frame of the tab.
+ *
+ * Returns { success: true, frames } or { success: false, notice }. Injection
+ * failing is a distinct problem from the page not holding the expected content,
+ * and the two must not collapse into a single message.
+ */
+async function injectScraper(tabId, scraper) {
+  try {
+    const frames = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: scraper,
+    });
+    return { success: true, frames };
+  } catch (error) {
+    const description = String(error?.message ?? error).toLowerCase();
+    const isAccessDenied = NO_ACCESS_ERROR_PATTERNS.some(pattern =>
+      description.includes(pattern),
+    );
+    return {
+      success: false,
+      notice: isAccessDenied ? NOTICES.EXTENSION_HAS_NO_ACCESS : NOTICES.PAGE_NOT_ACCESSIBLE,
+    };
+  }
+}
+
+/**
+ * Collects the results the frames actually produced.
+ *
+ * `allFrames` yields one entry per frame, and HQBed embeds same-origin iframes
+ * alongside the real page. A frame whose script threw reports `result:
+ * undefined` rather than `null`, so both empty shapes have to be dropped here —
+ * `!== null` alone lets a bystander frame mask the frame holding the map.
+ */
+function collectFrameResults(frames) {
+  return frames.map(frame => frame.result).filter(result => result != null);
+}
+
+// Both occupancy scrapers report OCCUPANCY_TABLE_NOT_FOUND when the frame they
+// landed in has no occupancy table at all. Every bystander frame answers that
+// way, so it means "wrong frame", not "wrong page", and such a frame must never
+// speak for the tab: the frame that found the table is the only authoritative
+// one. Falling back to results[0] let a bystander report "abre a Ocupação" over
+// the precise reason the real frame had to give.
+const NOT_THE_OCCUPANCY_FRAME = 'OCCUPANCY_TABLE_NOT_FOUND';
+
+function selectOccupancyResult(frames) {
+  const results = collectFrameResults(frames);
+  return (
+    results.find(result => result.success === true) ??
+    results.find(result => result.reason !== NOT_THE_OCCUPANCY_FRAME) ??
+    results[0] ??
+    null
+  );
+}
+
+/**
+ * One-line trace of what the tab actually looked like, for the console.
+ *
+ * Several distinct defects produce a byte-identical "wrong page" notice, which
+ * makes them indistinguishable in the field. This names the branch that fired.
+ */
+function describeAttempt(activeTab, frames) {
+  const parts = [`url:${activeTab.url ? 'ok' : 'oculta'}`];
+
+  if (frames) {
+    const reasons = collectFrameResults(frames).map(result =>
+      result.success === true ? 'ok' : (result.reason ?? 'sem-motivo'),
+    );
+    parts.push(`frames:${frames.length}`);
+    parts.push(`resultados:${reasons.length ? reasons.join(',') : 'nenhum'}`);
+  }
+
+  return parts.join(' · ');
+}
+
+function showNotice(notice, diagnostic) {
+  if (diagnostic) console.debug(`[Slow Hostel Assist] ${notice.title} — ${diagnostic}`);
+  view.showNotice(notice);
 }
 
 // ── Check-in tomorrow flow ───────────────────────────────────────────────────
@@ -106,152 +170,103 @@ function buildWhatsAppUrl(phone, firstName) {
   return `https://web.whatsapp.com/send?phone=${normalized}&text=${encodeURIComponent(message)}`;
 }
 
-function renderGuestCard(guest) {
-  const card = document.createElement('div');
-  card.className = 'guest-card';
-
-  const name = document.createElement('div');
-  name.className = 'guest-card-name';
-  name.textContent =
-    guest.guestCount > 1
-      ? `${guest.firstName} · ${guest.guestCount} hóspedes`
-      : guest.firstName;
-
-  const row = document.createElement('div');
-  row.className = 'guest-card-row';
-
-  const phoneInput = document.createElement('input');
-  phoneInput.type = 'tel';
-  phoneInput.className = 'guest-phone-input';
-  phoneInput.placeholder = 'Telefone (ex: 5511999999999)';
-  phoneInput.value = guest.phone ?? '';
-
-  const whatsappButton = document.createElement('button');
-  whatsappButton.className = 'btn-whatsapp';
-  whatsappButton.textContent = '📲 Abrir';
-
-  whatsappButton.addEventListener('click', () => {
-    const phone = phoneInput.value.trim();
-    if (!phone) {
-      phoneInput.focus();
-      return;
-    }
-    chrome.tabs.create({ url: buildWhatsAppUrl(phone, guest.firstName), active: true });
-  });
-
-  row.appendChild(phoneInput);
-  row.appendChild(whatsappButton);
-  card.appendChild(name);
-  card.appendChild(row);
-
-  return card;
+function openWhatsAppConversation(phone, firstName) {
+  chrome.tabs.create({ url: buildWhatsAppUrl(phone, firstName), active: true });
 }
 
 async function handleCheckinTomorrowGeneration(activeTab) {
-  if (!isOccupancyPage(activeTab.url ?? '')) {
-    showError(ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN);
+  if (isDefinitelyDifferentSite(activeTab.url)) {
+    showNotice(NOTICES.CHECKIN_TOMORROW_PAGE_NOT_OPEN, describeAttempt(activeTab));
     return;
   }
 
-  let frames;
+  const injection = await injectScraper(activeTab.id, scrapeCheckinTomorrowGuests);
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId: activeTab.id, allFrames: true },
-      func: scrapeCheckinTomorrowGuests,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+  if (!injection.success) {
+    showNotice(injection.notice, describeAttempt(activeTab));
     return;
   }
 
-  const results = frames.map(frame => frame.result).filter(result => result != null);
-  // The occupancy table lives in a single frame; the others report a failure.
-  const scraped = results.find(result => result.success) ?? results[0] ?? null;
+  const trace = describeAttempt(activeTab, injection.frames);
+  const scraped = selectOccupancyResult(injection.frames);
 
   if (!scraped) {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+    showNotice(NOTICES.PAGE_NOT_ACCESSIBLE, trace);
     return;
   }
 
   if (!scraped.success) {
-    showError(
-      CHECKIN_FAILURE_MESSAGES[scraped.reason] ?? ERROR_MESSAGES.CHECKIN_TOMORROW_PAGE_NOT_OPEN,
+    showNotice(
+      CHECKIN_FAILURE_NOTICES[scraped.reason] ?? NOTICES.CHECKIN_TOMORROW_PAGE_NOT_OPEN,
+      trace,
     );
     return;
   }
 
   if (scraped.bookings.length === 0) {
-    statusMessage.className = 'status ok';
-    statusMessage.textContent = ERROR_MESSAGES.CHECKIN_TOMORROW_NO_GUESTS;
+    view.showIdle();
+    view.showFeedback(CHECKIN_TOMORROW_NO_GUESTS_MESSAGE);
     return;
   }
 
-  statusMessage.textContent = '';
-  guestList.innerHTML = '';
-
-  for (const guest of scraped.bookings) {
-    guestList.appendChild(renderGuestCard(guest));
-  }
+  const tomorrow = nextDay(new Date());
+  view.showGuestList(scraped.bookings, formatArrivalsSummary(tomorrow, scraped.bookings.length));
 }
 
 // ── Breakfast flow ───────────────────────────────────────────────────────────
 
 async function handleBreakfastGeneration(activeTab) {
-  if (!isOccupancyPage(activeTab.url ?? '')) {
-    showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN);
+  if (isDefinitelyDifferentSite(activeTab.url)) {
+    showNotice(NOTICES.OCCUPANCY_PAGE_NOT_OPEN, describeAttempt(activeTab));
     return;
   }
 
-  let frames;
+  const injection = await injectScraper(activeTab.id, scrapeBreakfastData);
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId: activeTab.id, allFrames: true },
-      func: scrapeBreakfastData,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+  if (!injection.success) {
+    showNotice(injection.notice, describeAttempt(activeTab));
     return;
   }
 
-  const scraped = frames.find(frame => frame.result !== null)?.result ?? null;
+  const trace = describeAttempt(activeTab, injection.frames);
+  const scraped = selectOccupancyResult(injection.frames);
 
   if (!scraped) {
-    showError(ERROR_MESSAGES.OCCUPANCY_PAGE_NOT_OPEN);
+    showNotice(NOTICES.PAGE_NOT_ACCESSIBLE, trace);
     return;
   }
 
-  const template = generateBreakfastList(scraped);
-  showResult(template, BREAKFAST_TAG_LABEL);
+  if (!scraped.success) {
+    showNotice(BREAKFAST_FAILURE_NOTICES[scraped.reason] ?? NOTICES.OCCUPANCY_PAGE_NOT_OPEN, trace);
+    return;
+  }
+
+  view.showResult(generateBreakfastList(scraped), BREAKFAST_TAG_LABEL);
 }
 
 // ── Quote / Pre-reservation flow ─────────────────────────────────────────────
 
-async function handleReservationGeneration(tabId, mode) {
-  let frames;
+const UNKNOWN_SCRAPED_VALUE = '???';
 
-  try {
-    frames = await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      func: scrapeReservationData,
-    });
-  } catch {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+async function handleReservationGeneration(tabId, mode) {
+  const injection = await injectScraper(tabId, scrapeReservationData);
+
+  if (!injection.success) {
+    view.showNotice(injection.notice);
     return;
   }
 
-  const scraped = frames.find(
-    frame => frame.result !== null && frame.result.checkIn !== '???',
-  )?.result ?? null;
+  const scraped = collectFrameResults(injection.frames).find(
+    result => result.checkIn !== UNKNOWN_SCRAPED_VALUE,
+  ) ?? null;
 
   if (!scraped) {
-    showError(ERROR_MESSAGES.BOOKING_MODAL_NOT_OPEN);
+    view.showNotice(NOTICES.BOOKING_MODAL_NOT_OPEN);
     return;
   }
 
   const roomType = detectRoomType(scraped.roomName);
-  const showDiscountToGuest = checkboxShowDiscount.checked;
+  const showDiscountToGuest = view.isDiscountVisibleToGuest;
 
   const template =
     mode === TemplateMode.PRE_RESERVATION
@@ -263,27 +278,30 @@ async function handleReservationGeneration(tabId, mode) {
       ? PRE_RESERVATION_ROOM_TYPE_LABELS[roomType]
       : QUOTE_ROOM_TYPE_LABELS[roomType];
 
-  showResult(template, tagLabel);
+  view.showResult(template, tagLabel);
 }
 
-// ── Generate button ──────────────────────────────────────────────────────────
+// ── Generation entry point ───────────────────────────────────────────────────
 
-buttonGenerate.addEventListener('click', async () => {
-  statusMessage.className = 'status';
-  statusMessage.textContent = LOADING_MESSAGE;
-  guestList.innerHTML = '';
+async function generateForActiveMode() {
+  view.showLoading();
 
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!activeTab.id) {
-    showError(ERROR_MESSAGES.PAGE_NOT_ACCESSIBLE);
+
+  if (!activeTab?.id) {
+    view.showNotice(NOTICES.PAGE_NOT_ACCESSIBLE);
     return;
   }
 
   if (activeTemplateMode === TemplateMode.CHECKIN_TOMORROW) {
     await handleCheckinTomorrowGeneration(activeTab);
-  } else if (activeTemplateMode === TemplateMode.BREAKFAST) {
-    await handleBreakfastGeneration(activeTab);
-  } else {
-    await handleReservationGeneration(activeTab.id, activeTemplateMode);
+    return;
   }
-});
+
+  if (activeTemplateMode === TemplateMode.BREAKFAST) {
+    await handleBreakfastGeneration(activeTab);
+    return;
+  }
+
+  await handleReservationGeneration(activeTab.id, activeTemplateMode);
+}

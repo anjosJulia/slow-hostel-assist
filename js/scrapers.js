@@ -75,13 +75,28 @@ export function scrapeReservationData() {
  * For private rooms with multiple guests, fetches the full guest list from
  * the HQBed tooltip endpoint so every guest appears by name.
  *
+ * Returns { success: true, responsibleStaff, days } or { success: false, reason },
+ * where reason mirrors BreakfastScrapeFailure in constants.js — duplicated as
+ * string literals because this function cannot import anything (see below).
+ * Distinct reasons matter: HQBed only renders a ten-day window of the occupancy
+ * map, so paging it away from today is a different problem from being on the
+ * wrong page, and the operator needs to be told which one happened.
+ *
  * IMPORTANT: This function is serialized and injected into the HQBed page via
  * chrome.scripting.executeScript. It MUST be completely self-contained —
  * no references to variables or imports outside this function body.
  */
 export async function scrapeBreakfastData() {
+  const FailureReason = {
+    OCCUPANCY_TABLE_NOT_FOUND: 'OCCUPANCY_TABLE_NOT_FOUND',
+    TODAY_COLUMN_NOT_VISIBLE: 'TODAY_COLUMN_NOT_VISIBLE',
+    NO_UPCOMING_DAYS: 'NO_UPCOMING_DAYS',
+  };
+
   const occupancyTable = document.querySelector('table#occupancy');
-  if (!occupancyTable) return null;
+  if (!occupancyTable) {
+    return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
+  }
 
   // ── Constants (defined inline — function must be self-contained) ────────
 
@@ -195,7 +210,9 @@ export async function scrapeBreakfastData() {
   // ── Parse date columns from thead ───────────────────────────────────────
 
   const theadRow = occupancyTable.querySelector('thead tr:first-child');
-  if (!theadRow) return null;
+  if (!theadRow) {
+    return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
+  }
 
   const dateColumns = [];
   const headerCells = Array.from(theadRow.children);
@@ -215,7 +232,9 @@ export async function scrapeBreakfastData() {
     });
   }
 
-  if (!dateColumns.length) return null;
+  if (!dateColumns.length) {
+    return { success: false, reason: FailureReason.OCCUPANCY_TABLE_NOT_FOUND };
+  }
 
   // ── Find today's column ─────────────────────────────────────────────────
 
@@ -225,7 +244,11 @@ export async function scrapeBreakfastData() {
   const todayColumnIndex = dateColumns.findIndex(
     col => col.dateObject.getTime() === today.getTime(),
   );
-  if (todayColumnIndex === -1) return null;
+  // HQBed renders only the ten days starting at the map's current start date,
+  // so paging the map forward or back removes today's column from the DOM.
+  if (todayColumnIndex === -1) {
+    return { success: false, reason: FailureReason.TODAY_COLUMN_NOT_VISIBLE };
+  }
 
   // ── Pre-scan: resolve room short label per table-color-N class ──────────
 
@@ -362,9 +385,11 @@ export async function scrapeBreakfastData() {
     });
   }
 
-  if (!days.length) return null;
+  if (!days.length) {
+    return { success: false, reason: FailureReason.NO_UPCOMING_DAYS };
+  }
 
-  return { responsibleStaff, days };
+  return { success: true, responsibleStaff, days };
 }
 
 /**
