@@ -27,20 +27,27 @@ export function createGuestCard(guest, onOpenConversation) {
   const phoneInput = buildPhoneInput(guest);
   const openButton = buildOpenButton();
 
+  const normalizePhone = (value) => value.replace(/\D/g, '');
+  const isDialablePhone = (value) => {
+    const digits = normalizePhone(value);
+    const localDigits = digits.startsWith('55') ? digits.slice(2) : digits;
+    return localDigits.length >= 10;
+  };
+
   const syncButtonState = () => {
-    openButton.disabled = phoneInput.value.trim().length === 0;
+    openButton.disabled = !isDialablePhone(phoneInput.value);
   };
 
   phoneInput.addEventListener('input', syncButtonState);
   openButton.addEventListener('click', () => {
-    const phone = phoneInput.value.trim();
+    const phoneDigits = normalizePhone(phoneInput.value);
 
-    if (!phone) {
+    if (!isDialablePhone(phoneDigits)) {
       phoneInput.focus();
       return;
     }
 
-    onOpenConversation(phone, guest);
+    onOpenConversation(phoneDigits, guest);
   });
 
   syncButtonState();
