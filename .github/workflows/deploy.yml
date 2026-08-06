@@ -27,7 +27,7 @@ jobs:
         run: |
           node -e "
             const fs = require('fs');
-            const file = './manifest.json'; // Ajuste o caminho se necessário (ex: ./public/manifest.json)
+            const file = './manifest.json';
             const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
 
             let parts = manifest.version.split('.').map(Number);
@@ -35,11 +35,9 @@ jobs:
             manifest.version = parts.join('.');
 
             fs.writeFileSync(file, JSON.stringify(manifest, null, 2));
-            console.log('NEW_VERSION=' + manifest.version);
+            console.log('NOVA_VERSAO=' + manifest.version);
 
-            // Grava a nova versão nas variáveis do GitHub Actions
-            const fsOutput = require('fs');
-            fsOutput.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + manifest.version + '\n');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + manifest.version + '\n');
           "
 
       - name: Commit da nova versão e Criação da Tag
@@ -49,11 +47,9 @@ jobs:
 
           NEW_VER="v${{ steps.update_version.outputs.version }}"
 
-          # Garante o envio do manifest.json atualizado para o repositório
-          git add manifest.json # Ajuste o caminho do arquivo se necessário
+          git add manifest.json
           git commit -m "chore(release): bump version to $NEW_VER [skip ci]"
 
-          # Cria a tag e faz o push para a main
           git tag $NEW_VER
           git push origin main --follow-tags
 
@@ -64,14 +60,14 @@ jobs:
 
       - name: Criar arquivo ZIP
         run: |
-          zip -r extension.zip ./dist # Ajuste 'dist' para a sua pasta de saída do build
+          zip -r extension.zip ./dist
 
       - name: Upload para Chrome Web Store
-        uses: chrome-stats/chrome-extension-upload-action@v2
+        uses: chrome-stats/chrome-extension-upload@v2
         with:
           extension-id: ${{ secrets.EXTENSION_ID }}
           client-id: ${{ secrets.CLIENT_ID }}
           client-secret: ${{ secrets.CLIENT_SECRET }}
           refresh-token: ${{ secrets.REFRESH_TOKEN }}
-          zip-path: "extension.zip"
+          file-path: "extension.zip"
           publish: true
