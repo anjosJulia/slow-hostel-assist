@@ -53,21 +53,31 @@ jobs:
           git tag $NEW_VER
           git push origin main --follow-tags
 
-      - name: Build da extensão
+      - name: Build da extensão (se necessário)
         run: |
-          if [ -f package-lock.json ]; then
+          if [ -f package.json ]; then
             npm ci
             npm run build
+            echo "✓ Build concluído"
           else
-            echo "Sem pipeline de build Node.js (package-lock.json não encontrado); usando arquivos fonte."
+            echo "✓ Projeto vanilla - usando arquivos fonte"
           fi
 
       - name: Criar arquivo ZIP
         run: |
           if [ -d dist ]; then
-            zip -r extension.zip ./dist
+            # Se houver pasta dist (projeto com build), zipar o conteúdo dela
+            cd dist && zip -r ../extension.zip . && cd ..
+            echo "✓ ZIP criado de dist/"
           else
-            zip -r extension.zip . -x ".git/*" ".github/*" "extension.zip"
+            # Projeto vanilla - zipar apenas arquivos necessários da raiz
+            zip -r extension.zip \
+              manifest.json \
+              background.js \
+              popup.html \
+              icons/ \
+              -x "*.git*" "*.github*" "node_modules/*" "*.zip" "*.md"
+            echo "✓ ZIP criado da raiz"
           fi
 
       - name: Upload para Chrome Web Store
