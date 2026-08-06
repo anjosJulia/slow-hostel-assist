@@ -78,4 +78,4 @@ jobs:
           client-secret: ${{ secrets.CLIENT_SECRET }}
           refresh-token: ${{ secrets.REFRESH_TOKEN }}
           file-path: "extension.zip"
-          publish: true
+          publish: false
