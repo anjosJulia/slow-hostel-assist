@@ -122,8 +122,7 @@ export const BREAKFAST_FAILURE_NOTICES = Object.freeze({
     NOTICES.OCCUPANCY_PAGE_NOT_OPEN,
   [BreakfastScrapeFailure.TODAY_COLUMN_NOT_VISIBLE]:
     NOTICES.OCCUPANCY_TODAY_NOT_VISIBLE,
-  [BreakfastScrapeFailure.NO_UPCOMING_DAYS]:
-    NOTICES.BREAKFAST_NO_UPCOMING_DAYS,
+  [BreakfastScrapeFailure.NO_UPCOMING_DAYS]: NOTICES.BREAKFAST_NO_UPCOMING_DAYS,
 })
 
 // ── Check-in scraping failures ──────────────────────────────────────────────
@@ -151,7 +150,8 @@ export const CHECKIN_FAILURE_NOTICES = Object.freeze({
 export const SUCCESS_MESSAGE = "Copiado! Cola direto no WhatsApp."
 export const COPY_FAILED_MESSAGE =
   "Não deu para copiar sozinho — seleciona o texto e usa Ctrl+C."
-export const LOADING_MESSAGE = "Gerando… faça carinho em Muximba 🐈"
+export const LOADING_MESSAGE =
+  "Gerando… faça carinho em Muximba enquanto aguarda"
 export const IDLE_HINT_MESSAGE =
   "Abra a reserva no HQBed e a gente monta o texto."
 export const EDIT_HINT_MESSAGE =
