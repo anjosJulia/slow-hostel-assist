@@ -63,7 +63,7 @@ jobs:
           zip -r extension.zip ./dist
 
       - name: Upload para Chrome Web Store
-        uses: chrome-stats/chrome-extension-upload@v2
+        uses: mnao305/chrome-extension-upload@v6.0.0
         with:
           extension-id: ${{ secrets.EXTENSION_ID }}
           client-id: ${{ secrets.CLIENT_ID }}
