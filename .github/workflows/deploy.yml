@@ -1,0 +1,77 @@
+name: Deploy Chrome Extension
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Incrementar versão no manifest.json
+        id: update_version
+        run: |
+          node -e "
+            const fs = require('fs');
+            const file = './manifest.json'; // Ajuste o caminho se necessário (ex: ./public/manifest.json)
+            const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+            let parts = manifest.version.split('.').map(Number);
+            parts[parts.length - 1] += 1;
+            manifest.version = parts.join('.');
+
+            fs.writeFileSync(file, JSON.stringify(manifest, null, 2));
+            console.log('NEW_VERSION=' + manifest.version);
+
+            // Grava a nova versão nas variáveis do GitHub Actions
+            const fsOutput = require('fs');
+            fsOutput.appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + manifest.version + '\n');
+          "
+
+      - name: Commit da nova versão e Criação da Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          NEW_VER="v${{ steps.update_version.outputs.version }}"
+
+          # Garante o envio do manifest.json atualizado para o repositório
+          git add manifest.json # Ajuste o caminho do arquivo se necessário
+          git commit -m "chore(release): bump version to $NEW_VER [skip ci]"
+
+          # Cria a tag e faz o push para a main
+          git tag $NEW_VER
+          git push origin main --follow-tags
+
+      - name: Build da extensão
+        run: |
+          npm ci
+          npm run build
+
+      - name: Criar arquivo ZIP
+        run: |
+          zip -r extension.zip ./dist # Ajuste 'dist' para a sua pasta de saída do build
+
+      - name: Upload para Chrome Web Store
+        uses: chrome-stats/chrome-extension-upload-action@v2
+        with:
+          extension-id: ${{ secrets.EXTENSION_ID }}
+          client-id: ${{ secrets.CLIENT_ID }}
+          client-secret: ${{ secrets.CLIENT_SECRET }}
+          refresh-token: ${{ secrets.REFRESH_TOKEN }}
+          zip-path: "extension.zip"
+          publish: true
