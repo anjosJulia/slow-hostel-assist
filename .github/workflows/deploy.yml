@@ -55,15 +55,23 @@ jobs:
 
       - name: Build da extensão
         run: |
-          npm ci
-          npm run build
+          if [ -f package-lock.json ]; then
+            npm ci
+            npm run build
+          else
+            echo "Sem pipeline de build Node.js (package-lock.json não encontrado); usando arquivos fonte."
+          fi
 
       - name: Criar arquivo ZIP
         run: |
-          zip -r extension.zip ./dist
+          if [ -d dist ]; then
+            zip -r extension.zip ./dist
+          else
+            zip -r extension.zip . -x ".git/*" ".github/*" "extension.zip"
+          fi
 
       - name: Upload para Chrome Web Store
-        uses: chrome-stats/chrome-extension-upload@v2
+        uses: mnao305/chrome-extension-upload@v6.0.0
         with:
           extension-id: ${{ secrets.EXTENSION_ID }}
           client-id: ${{ secrets.CLIENT_ID }}
