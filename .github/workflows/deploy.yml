@@ -75,10 +75,26 @@ jobs:
               manifest.json \
               background.js \
               popup.html \
+              popup.js \
+              css/ \
+              js/ \
+              fonts/ \
               icons/ \
-              -x "*.git*" "*.github*" "node_modules/*" "*.zip" "*.md"
+              -x "*.git*" "*.github*" "node_modules/*" "*.zip" "*.md" "*.DS_Store"
             echo "✓ ZIP criado da raiz"
           fi
+
+      - name: Validar conteúdo do ZIP
+        run: |
+          # Falha o deploy cedo se algum asset referenciado pelo manifest/popup ficou de fora
+          REQUIRED_ENTRIES="manifest.json background.js popup.html popup.js css/panel.css css/tokens.css js/diagnostics.js icons/symbol.png"
+          for entry in $REQUIRED_ENTRIES; do
+            if ! unzip -l extension.zip | grep -q " $entry$"; then
+              echo "✗ Arquivo obrigatório ausente no ZIP: $entry"
+              exit 1
+            fi
+          done
+          echo "✓ ZIP contém todos os arquivos obrigatórios"
 
       - name: Upload para Chrome Web Store
         uses: mnao305/chrome-extension-upload@v6.0.0
